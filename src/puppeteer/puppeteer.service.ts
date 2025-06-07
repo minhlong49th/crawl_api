@@ -3,33 +3,52 @@ import puppeteer from 'puppeteer';
 
 @Injectable()
 export class PuppeteerService {
-  async fetchPartnerData(targetUrl: string): Promise<string | null> {
+  async fetchPartnerData(targetUrl: string): Promise<string> {
     const browser = await puppeteer.launch({
-      headless: true,
+      headless: false,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    //   executablePath: process.env.CHROME_EXECUTABLE_PATH, // For Docker support
+      executablePath: process.env.CHROMIUM_PATH, // Set your Chrome/Chromium executable path if using puppeteer-core
     });
 
     const page = await browser.newPage();
-    await page.goto(targetUrl, { waitUntil: 'networkidle2' });
 
-    let bodyText: string | null = null;
+    // Log all requests
+    page.on('request', request => {
+      console.log(`[Request] ${request.method()} ${request.url()}`);
+    });
 
+    // Log all responses
+    page.on('response', response => {
+      console.log(`[Response] ${response.status()} ${response.url()}`);
+    });
+
+    // Setup waitForResponse before navigation to catch the request
+    const responsePromise = page.waitForResponse(
+      response => response.url() === 'https://api.goaffpro.com/partner/' && response.request().method() === 'GET',
+      { timeout: 60000 } // 30 seconds timeout
+    );
+
+    // Navigate to the target URL
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+
+    // Wait for the response
+    const response = await responsePromise;
+
+    // Sometimes the response body might be empty or cause errors if it’s an opaque CORS preflight, so handle safely
+    let data: string;
     try {
-      const response = await page.waitForResponse((res) =>
-        res.url().includes('https://api.goaffpro.com/partner/')
-      );
+      data = await response.text();
+     
 
-      if (response && response.ok()) {
-        bodyText = await response.text();
-      } else {
-        console.warn('Response not OK or undefined');
-      }
-    } catch (error) {
-      console.error('Error fetching or reading response body:', error);
+    } catch (err) {
+      console.warn('Error fetching or reading response body:', err);
+      data = '';
     }
 
     await browser.close();
-    return bodyText;
+
+    return data;
   }
+
+
 }
